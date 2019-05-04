@@ -8,12 +8,9 @@ extern int LED_PIN;
 
 extern float shuntvoltage, busvoltage, loadvoltage;
 extern double current_mA, current_A, sumCurrent;
-// extern float power_mW = 0, power_W = 0;
-// extern uint32_t pevTime = 0, pevPrint = 0;
-// extern uint32_t powerCount = 0;
-// extern double powerSum = 0;
-// extern double powerAverage = 0;
-// extern double powerHour = 0, powerWattHour, powerKilosWattHour;
+
+extern float sd_busVoltage;
+extern double sd_current_mA;
 
 extern char myName[];
 

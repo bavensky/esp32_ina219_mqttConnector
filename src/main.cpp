@@ -18,12 +18,20 @@
 #include <Wire.h>
 #include <SPI.h>
 
+#include "RTClib.h"
+RTC_DS1307 rtc;
+
+char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+
 #include <Adafruit_INA219.h>
 Adafruit_INA219 ina219(0x40);
 
 float shuntvoltage, busvoltage, loadvoltage;
 double current_mA, current_A, sumCurrent;
 float power_mW = 0, power_W = 0;
+
+float sd_busVoltage;
+double sd_current_mA;
 
 uint32_t pevTime = 0, pevPrint = 0;
 uint32_t powerCount = 0;
@@ -44,10 +52,16 @@ int relayPinState = HIGH;
 int LED_PIN = 2;
 
 char myName[40];
+char dateBuffer[100];
+char timeBuffer[100];
 
 void init_hardware()
 {
   Wire.begin(21, 22);
+
+  rtc.begin();
+  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+
   ina219.begin();
   ina219.setCalibration_16V_400mA();
 
@@ -185,7 +199,6 @@ void setupTasks()
   xTaskCreatePinnedToCore([](void *parameter) -> void {
     BaseType_t xStatus;
     const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
-    Data_t data;
     Serial.println("Task Recv is Running..");
     for (;;)
     {
@@ -195,14 +208,14 @@ void setupTasks()
       static char buffer[100];
 
       Data_t data;
-      data.dateString = String("01/05/19");
-      data.timeString = String("10:43");
+      data.dateString = String(dateBuffer);
+      data.timeString = String(timeBuffer);
       data.voltage_V = ina219.getBusVoltage_V();
       data.ampere_mA = ina219.getCurrent_mA();
 
       if (xStatus == pdPASS)
       {
-        sprintf(buffer, "INSERT INTO datalog(date, time, voltage, ampere) VALUES('%s', '%s', %lu, %lu);",  data.dateString.c_str(), data.timeString.c_str(), data.voltage_V, data.ampere_mA);
+        sprintf(buffer, "INSERT INTO database(date, time, voltage, ampere) VALUES('%s', '%s', %lu, %lu);", data.dateString.c_str(), data.timeString.c_str(), data.voltage_V, data.ampere_mA);
         if (db_exec(db1, buffer) == SQLITE_OK)
         {
           Serial.println("INSERT OK.");
@@ -240,10 +253,13 @@ void setupTasks()
 }
 
 uint32_t currentRowId = 0;
+String dateData;
 int xcallback(void *data, int argc, char **argv, char **azColName)
 {
   currentRowId = strtoul(argv[0] ? argv[0] : "0", NULL, 10);
+  dateData = strtoul(argv[1] ? argv[1] : "0", NULL, 10);
   Serial.printf("currentRowId = %lu\r\n", currentRowId);
+  Serial.printf("dateData = %s\r\n", dateData.c_str());
   return 0;
 }
 
@@ -252,15 +268,34 @@ static void NB_IoTTask(void *parameter)
 {
   while (1)
   {
-    sprintf(buffer, "SELECT id,heap,ms FROM datalog ORDER BY id DESC LIMIT 1;");
+    sprintf(buffer, "SELECT id, date, time, voltage, ampere FROM database ORDER BY id DESC LIMIT 1;");
     if (db_exec(db1, buffer, xcallback) == SQLITE_OK)
     {
       Serial.println("QUERY OK.");
+      Serial.print("data: ");
+      Serial.print(buffer);
+      Serial.print("\n");
+      Serial.print("\n");
     }
-    sprintf(buffer, "DELETE FROM datalog WHERE id = %lu;", currentRowId);
+    else
+    {
+      Serial.println("QUERY failed.");
+      Serial.print("\n");
+      Serial.print("\n");
+    }
+
+    sprintf(buffer, "DELETE FROM database WHERE id = %lu;", currentRowId);
     if (db_exec(db1, buffer) == SQLITE_OK)
     {
       Serial.println("DELETE OK.");
+      Serial.print("\n");
+      Serial.print("\n");
+    }
+    else
+    {
+      Serial.println("DELETE failed.");
+      Serial.print("\n");
+      Serial.print("\n");
     }
     vTaskDelay(1000);
   }
@@ -285,9 +320,10 @@ void setup()
   SD.begin();
   sqlite3_initialize();
   delay(50);
-  if (openDb("/sd/powerlogger.db", &db1) == SQLITE_OK)
+
+  if (openDb("/sd/dataPowerLogger.db", &db1) == SQLITE_OK)
   {
-    rc = db_exec(db1, "CREATE TABLE IF NOT EXISTS datalogger (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, time TEXT, name TEXT, voltage INTEGER,  ampere INTEGER);");
+    rc = db_exec(db1, "CREATE TABLE IF NOT EXISTS database (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, time TEXT, voltage INTEGER,  ampere INTEGER);");
     if (rc != SQLITE_OK)
     {
       sqlite3_close(db1);
@@ -296,8 +332,17 @@ void setup()
   }
 }
 
+uint32_t pevTimeRTC;
+
 void loop()
 {
   taskYIELD();
   mqtt->loop();
+  DateTime now = rtc.now();
+  // if (millis() - pevTimeRTC > 3000)
+  // {
+  //   pevTimeRTC = millis();
+    sprintf(dateBuffer, "%d/%d/%d", now.day(), now.month(), now.year());
+    sprintf(timeBuffer, "%d:%d", now.hour(), now.minute());
+  // }
 }
